@@ -1,0 +1,11 @@
+<environmentvariabledefinition schemaname="pni_ApiBaseUrl">
+  <defaultvalue>https://example.invalid</defaultvalue>
+  <displayname default="API Base URL">
+    <label description="API Base URL" languagecode="1033" />
+  </displayname>
+  <introducedversion>1.0.0.0</introducedversion>
+  <iscustomizable>1</iscustomizable>
+  <isrequired>0</isrequired>
+  <secretstore>0</secretstore>
+  <type>100000000</type>
+</environmentvariabledefinition>
