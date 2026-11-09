@@ -12,8 +12,8 @@ Items marked **[confirm]** are untested assumptions. Tick them off during the fi
 | Environment URLs recorded | e.g. `https://<org>.crm.dynamics.com`. Needed for GitHub variables in section 4. |
 | Sample solution in dev | Publisher prefix `pni`. Contains: table `pni_githubdeployments`, environment variable `pni_ApiBaseUrl` (text), connection reference `pni_DataverseConnection` (Microsoft Dataverse), cloud flow `GHD - Flow` using that connection reference. |
 | Settings names confirmed | After the first export, run `pac solution create-settings --solution-zip <zip> --settings-file check.json` and compare the `SchemaName` and `LogicalName` values with `deployment-settings/template.json`. Generated names can differ from the display names. |
-| Dataverse connection in test and in prod | Created once in each environment. Record each connection ID (from the URL when you open the connection in make.powerapps.com). |
-| Connection usable by the deployment identity | Microsoft Learn states that on import, connections are validated against the owner of the connection reference, so the connection must be owned by or shared with that owner. With a service principal deploying, the owner is the application user. **[confirm]** whether a Dataverse connection can be shared with the application user, or whether the flow needs a different arrangement. This is the item most likely to fail. |
+| Dataverse connection in test and in prod | Created once in each environment, under your own account. The connection ID is the part of the URL after `shared_commondataserviceforapps/`, for example `shared-commondataser-<guid>`. Use the whole value, prefix included. |
+| Connection shared with the application user | **Required.** In each of test and prod, open the connection and share it with the application user as **Can use**. The service principal owns the imported connection reference, and Dataverse checks that it may use the connection. Without the share, the import fails with `ConnectionAuthorizationFailed` (403). Confirmed in the dry run on 9 November 2026. |
 
 ## 2. Entra ID app registration
 
