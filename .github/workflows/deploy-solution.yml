@@ -54,6 +54,16 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
+      # A value pasted into GitHub with a trailing space or line break is stored as-is
+      # and breaks file paths later in a way that is hard to read. Fail early instead.
+      - name: Check SOLUTION_NAME
+        shell: bash
+        run: |
+          if [[ ! "$SOLUTION_NAME" =~ ^[A-Za-z0-9_]+$ ]]; then
+            echo "::error::Repository variable SOLUTION_NAME must be the solution's unique name: letters, numbers and underscores only, with no spaces or line breaks. Re-enter it under Settings > Secrets and variables > Actions > Variables."
+            exit 1
+          fi
+
       - name: Install Power Platform tools
         uses: microsoft/powerplatform-actions/actions-install@v1.9.2
 
