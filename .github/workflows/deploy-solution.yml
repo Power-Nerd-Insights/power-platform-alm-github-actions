@@ -1,0 +1,228 @@
+# Builds a managed solution from source control and promotes it dev -> test -> prod.
+#
+# Flow:
+#   1. build        Stamp the version, pack unmanaged and managed zips, run Solution Checker,
+#                   publish the managed zip as a build artefact.
+#   2. deploy-test  Import the same artefact into test using that environment's settings.
+#   3. deploy-prod  Waits on the "prod" GitHub environment's required reviewers, then imports
+#                   the same artefact into prod.
+#
+# The artefact built once in step 1 is the one deployed everywhere. Nothing is rebuilt
+# between test and prod, so what was tested is what ships.
+#
+# Authentication is a service principal with a client secret held as the repository
+# secret PP_CLIENT_SECRET. Every other tenant-specific value comes from GitHub repository
+# or environment variables, so this file contains no tenant IDs, URLs or connection IDs.
+# See SETUP.md.
+
+name: deploy-solution
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "deployment-settings/**"
+      - ".github/workflows/deploy-solution.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never run two deployments of this solution at the same time. A queued run waits
+# rather than cancelling one that is part way through an import.
+concurrency:
+  group: deploy-solution
+  cancel-in-progress: false
+
+env:
+  SOLUTION_NAME: ${{ vars.SOLUTION_NAME }}
+  SOLUTION_FOLDER: src/${{ vars.SOLUTION_NAME }}
+  OUTPUT_FOLDER: out
+  ARTEFACT_NAME: managed-solution
+
+jobs:
+  build:
+    name: Build and check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      solution-version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Power Platform tools
+        uses: microsoft/powerplatform-actions/actions-install@v1.9.2
+
+      # Managed upgrades rely on the version going up on every release. Keep the
+      # major.minor from source control and replace build.revision with the run number,
+      # so versions are traceable back to the workflow run that produced them.
+      - name: Stamp solution version
+        id: version
+        shell: bash
+        run: |
+          file="$SOLUTION_FOLDER/Other/Solution.xml"
+          current=$(grep -oP '(?<=<Version>)[^<]+' "$file")
+          major_minor=$(echo "$current" | cut -d. -f1-2)
+          new="${major_minor}.${GITHUB_RUN_NUMBER}.0"
+          sed -i "s|<Version>${current}</Version>|<Version>${new}</Version>|" "$file"
+          echo "Solution version: ${current} -> ${new}"
+          echo "version=${new}" >> "$GITHUB_OUTPUT"
+
+      - name: Pack unmanaged solution
+        uses: microsoft/powerplatform-actions/pack-solution@v1.9.2
+        with:
+          solution-folder: ${{ env.SOLUTION_FOLDER }}
+          solution-file: ${{ env.OUTPUT_FOLDER }}/${{ env.SOLUTION_NAME }}.zip
+          solution-type: Unmanaged
+
+      - name: Pack managed solution
+        uses: microsoft/powerplatform-actions/pack-solution@v1.9.2
+        with:
+          solution-folder: ${{ env.SOLUTION_FOLDER }}
+          solution-file: ${{ env.OUTPUT_FOLDER }}/${{ env.SOLUTION_NAME }}_managed.zip
+          solution-type: Managed
+
+      # Fails the job if the analysis itself fails or finishes with errors.
+      # It does not fail on findings by severity; see the README for how to add a threshold.
+      - name: Run Solution Checker
+        uses: microsoft/powerplatform-actions/check-solution@v1.9.2
+        with:
+          environment-url: ${{ vars.DEV_ENVIRONMENT_URL }}
+          app-id: ${{ vars.PP_APP_ID }}
+          tenant-id: ${{ vars.PP_TENANT_ID }}
+          client-secret: ${{ secrets.PP_CLIENT_SECRET }}
+          path: ${{ env.OUTPUT_FOLDER }}/${{ env.SOLUTION_NAME }}_managed.zip
+          geo: ${{ vars.CHECKER_GEO || 'UnitedStates' }}
+          checker-logs-artifact-name: solution-checker-logs
+
+      - name: Publish managed solution artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTEFACT_NAME }}
+          path: ${{ env.OUTPUT_FOLDER }}/${{ env.SOLUTION_NAME }}_managed.zip
+          if-no-files-found: error
+
+  deploy-test:
+    name: Deploy to test
+    needs: build
+    runs-on: ubuntu-latest
+    environment: test
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Download managed solution artefact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.ARTEFACT_NAME }}
+          path: ${{ env.OUTPUT_FOLDER }}
+
+      # Connection IDs and environment variable values differ per environment and are
+      # tenant-specific, so they are held as GitHub environment variables and substituted
+      # into the committed template here. Only the named variables are replaced.
+      - name: Render deployment settings
+        shell: bash
+        env:
+          DATAVERSE_CONNECTION_ID: ${{ vars.DATAVERSE_CONNECTION_ID }}
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
+        run: |
+          for name in DATAVERSE_CONNECTION_ID API_BASE_URL; do
+            if [ -z "${!name}" ]; then
+              echo "::error::GitHub environment variable $name is not set for this environment."
+              exit 1
+            fi
+          done
+          envsubst '${DATAVERSE_CONNECTION_ID} ${API_BASE_URL}' \
+            < deployment-settings/template.json \
+            > "$OUTPUT_FOLDER/deployment-settings.json"
+
+      - name: Install Power Platform tools
+        uses: microsoft/powerplatform-actions/actions-install@v1.9.2
+
+      - name: Confirm connection to test
+        uses: microsoft/powerplatform-actions/who-am-i@v1.9.2
+        with:
+          environment-url: ${{ vars.ENVIRONMENT_URL }}
+          app-id: ${{ vars.PP_APP_ID }}
+          tenant-id: ${{ vars.PP_TENANT_ID }}
+          client-secret: ${{ secrets.PP_CLIENT_SECRET }}
+
+      - name: Import managed solution
+        uses: microsoft/powerplatform-actions/import-solution@v1.9.2
+        with:
+          environment-url: ${{ vars.ENVIRONMENT_URL }}
+          app-id: ${{ vars.PP_APP_ID }}
+          tenant-id: ${{ vars.PP_TENANT_ID }}
+          client-secret: ${{ secrets.PP_CLIENT_SECRET }}
+          solution-file: ${{ env.OUTPUT_FOLDER }}/${{ env.SOLUTION_NAME }}_managed.zip
+          use-deployment-settings-file: true
+          deployment-settings-file: ${{ env.OUTPUT_FOLDER }}/deployment-settings.json
+          stage-and-upgrade: true
+          run-asynchronously: true
+          max-async-wait-time: 60
+
+  deploy-prod:
+    name: Deploy to prod
+    needs: [build, deploy-test]
+    runs-on: ubuntu-latest
+    environment: prod # Required reviewers on this environment pause the job until approved
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Download managed solution artefact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.ARTEFACT_NAME }}
+          path: ${{ env.OUTPUT_FOLDER }}
+
+      - name: Render deployment settings
+        shell: bash
+        env:
+          DATAVERSE_CONNECTION_ID: ${{ vars.DATAVERSE_CONNECTION_ID }}
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
+        run: |
+          for name in DATAVERSE_CONNECTION_ID API_BASE_URL; do
+            if [ -z "${!name}" ]; then
+              echo "::error::GitHub environment variable $name is not set for this environment."
+              exit 1
+            fi
+          done
+          envsubst '${DATAVERSE_CONNECTION_ID} ${API_BASE_URL}' \
+            < deployment-settings/template.json \
+            > "$OUTPUT_FOLDER/deployment-settings.json"
+
+      - name: Install Power Platform tools
+        uses: microsoft/powerplatform-actions/actions-install@v1.9.2
+
+      - name: Confirm connection to prod
+        uses: microsoft/powerplatform-actions/who-am-i@v1.9.2
+        with:
+          environment-url: ${{ vars.ENVIRONMENT_URL }}
+          app-id: ${{ vars.PP_APP_ID }}
+          tenant-id: ${{ vars.PP_TENANT_ID }}
+          client-secret: ${{ secrets.PP_CLIENT_SECRET }}
+
+      - name: Import managed solution
+        uses: microsoft/powerplatform-actions/import-solution@v1.9.2
+        with:
+          environment-url: ${{ vars.ENVIRONMENT_URL }}
+          app-id: ${{ vars.PP_APP_ID }}
+          tenant-id: ${{ vars.PP_TENANT_ID }}
+          client-secret: ${{ secrets.PP_CLIENT_SECRET }}
+          solution-file: ${{ env.OUTPUT_FOLDER }}/${{ env.SOLUTION_NAME }}_managed.zip
+          use-deployment-settings-file: true
+          deployment-settings-file: ${{ env.OUTPUT_FOLDER }}/deployment-settings.json
+          stage-and-upgrade: true
+          run-asynchronously: true
+          max-async-wait-time: 60
