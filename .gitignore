@@ -1,0 +1,23 @@
+# Build output from the workflows. Solution zips are artefacts, not source.
+out/
+*.zip
+
+# Deployment settings rendered with real values. Only template.json is committed.
+deployment-settings/*.json
+!deployment-settings/template.json
+
+# Settings files generated locally with pac solution create-settings
+check.json
+
+# Local environment and credentials
+.env
+.env.*
+*.pfx
+*.pem
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
