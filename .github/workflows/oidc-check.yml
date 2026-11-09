@@ -1,0 +1,40 @@
+# Rehearsal check only: proves that OIDC (workload identity federation) can authenticate
+# to Power Platform from this repository without a client secret.
+#
+# Not part of the demo. Delete it before publishing if it does not pass, or keep it as a
+# worked example of the "best practice" auth the session recommends.
+#
+# Needs a federated credential on the app registration with:
+#   Issuer:   https://token.actions.githubusercontent.com
+#   Audience: api://AzureADTokenExchange
+#   Subject:  repo:<OWNER>@<OWNER_ID>/<REPO>@<REPO_ID>:ref:refs/heads/main
+# (the format for repositories created after 15 July 2026; see the README)
+
+name: oidc-check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  who-am-i:
+    name: Authenticate to dev with OIDC
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # Lets the job request a GitHub OIDC token
+
+    steps:
+      - name: Install Power Platform tools
+        uses: microsoft/powerplatform-actions/actions-install@v1.9.2
+
+      # No client-secret input. If this step succeeds, the action exchanged the
+      # GitHub token for an Entra token through the federated credential.
+      - name: WhoAmI against dev
+        uses: microsoft/powerplatform-actions/who-am-i@v1.9.2
+        with:
+          environment-url: ${{ vars.DEV_ENVIRONMENT_URL }}
+          app-id: ${{ vars.PP_APP_ID }}
+          tenant-id: ${{ vars.PP_TENANT_ID }}

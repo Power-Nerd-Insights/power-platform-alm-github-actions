@@ -1,0 +1,112 @@
+# Captures the current state of the solution in dev and proposes it as a pull request.
+#
+# Exports both the unmanaged and managed zips, unpacks them together into src/ so that
+# the build workflow can later pack either type from source, then commits the result to
+# a new branch and opens a pull request against main. Merging the pull request is what
+# triggers deploy-solution.yml.
+#
+# Run manually from the Actions tab after publishing your changes in dev.
+
+name: export-solution
+
+on:
+  workflow_dispatch:
+    inputs:
+      description:
+        description: "Short description of the change (used in the commit and PR title)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: export-solution
+  cancel-in-progress: false
+
+env:
+  SOLUTION_NAME: ${{ vars.SOLUTION_NAME }}
+  SOLUTION_FOLDER: src/${{ vars.SOLUTION_NAME }}
+  OUTPUT_FOLDER: out
+
+jobs:
+  export:
+    name: Export from dev and open PR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # Push the new branch
+      pull-requests: write  # Open the pull request
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Power Platform tools
+        uses: microsoft/powerplatform-actions/actions-install@v1.9.2
+
+      - name: Confirm connection to dev
+        uses: microsoft/powerplatform-actions/who-am-i@v1.9.2
+        with:
+          environment-url: ${{ vars.DEV_ENVIRONMENT_URL }}
+          app-id: ${{ vars.PP_APP_ID }}
+          tenant-id: ${{ vars.PP_TENANT_ID }}
+          client-secret: ${{ secrets.PP_CLIENT_SECRET }}
+
+      - name: Export unmanaged solution
+        uses: microsoft/powerplatform-actions/export-solution@v1.9.2
+        with:
+          environment-url: ${{ vars.DEV_ENVIRONMENT_URL }}
+          app-id: ${{ vars.PP_APP_ID }}
+          tenant-id: ${{ vars.PP_TENANT_ID }}
+          client-secret: ${{ secrets.PP_CLIENT_SECRET }}
+          solution-name: ${{ env.SOLUTION_NAME }}
+          solution-output-file: ${{ env.OUTPUT_FOLDER }}/${{ env.SOLUTION_NAME }}.zip
+          managed: false
+          run-asynchronously: true
+
+      - name: Export managed solution
+        uses: microsoft/powerplatform-actions/export-solution@v1.9.2
+        with:
+          environment-url: ${{ vars.DEV_ENVIRONMENT_URL }}
+          app-id: ${{ vars.PP_APP_ID }}
+          tenant-id: ${{ vars.PP_TENANT_ID }}
+          client-secret: ${{ secrets.PP_CLIENT_SECRET }}
+          solution-name: ${{ env.SOLUTION_NAME }}
+          solution-output-file: ${{ env.OUTPUT_FOLDER }}/${{ env.SOLUTION_NAME }}_managed.zip
+          managed: true
+          run-asynchronously: true
+
+      # "Both" expects <name>.zip and <name>_managed.zip side by side, and writes the
+      # managed-only differences alongside the unmanaged source.
+      - name: Unpack solution into source control layout
+        uses: microsoft/powerplatform-actions/unpack-solution@v1.9.2
+        with:
+          solution-file: ${{ env.OUTPUT_FOLDER }}/${{ env.SOLUTION_NAME }}.zip
+          solution-folder: ${{ env.SOLUTION_FOLDER }}
+          solution-type: Both
+          overwrite-files: true
+
+      - name: Commit to a branch and open a pull request
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANGE_DESCRIPTION: ${{ inputs.description }}
+        run: |
+          if [ -z "$(git status --porcelain -- "$SOLUTION_FOLDER")" ]; then
+            echo "No changes in $SOLUTION_FOLDER. Nothing to propose."
+            exit 0
+          fi
+
+          branch="solution/${SOLUTION_NAME}-run-${GITHUB_RUN_NUMBER}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add -- "$SOLUTION_FOLDER"
+          git commit -m "${SOLUTION_NAME}: ${CHANGE_DESCRIPTION}"
+          git push --set-upstream origin "$branch"
+
+          gh pr create \
+            --base main \
+            --head "$branch" \
+            --title "${SOLUTION_NAME}: ${CHANGE_DESCRIPTION}" \
+            --body "Exported from dev by workflow run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}. Review the unpacked changes before merging. Merging triggers deployment to test."
