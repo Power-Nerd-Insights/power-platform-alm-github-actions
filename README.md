@@ -43,6 +43,7 @@ Design decisions worth knowing before you change anything:
 - **Build once, deploy many.** The managed zip is built in the `build` job and passed to the deploy jobs as an artefact. Test and prod receive the identical file.
 - **Version from the run number.** The workflow keeps `major.minor` from `Solution.xml` and sets the rest to `<run number>.0`, so each release has a higher version than the last and can be traced back to its run. Change `major.minor` in source when you want a new series.
 - **Deployment settings are a template.** `deployment-settings/template.json` holds placeholders. Each deploy job fills them from that GitHub environment's variables, so no connection IDs or tenant values are committed.
+- **First install and upgrade are handled differently.** Before importing, each deploy job checks whether the solution is already installed in the target. If it is, the import uses stage-and-upgrade, so components removed from source are also removed from the target. If it is not, the import is a plain first install, because an upgrade needs an existing version to upgrade from.
 - **Approval is a GitHub feature.** The `prod` job references the `prod` GitHub environment, which has required reviewers. Nothing in Power Platform enforces it.
 
 ## Repository structure
@@ -103,6 +104,7 @@ Changes that are risky:
 | Flow imports but stays off | Connection reference not bound. Check the deployment settings for that environment |
 | Import fails on missing dependencies | The solution uses a component that isn't in the target. Add it to the solution or deploy it first |
 | `deploy-test` fails with "variable is not set" | A GitHub environment variable is missing for `test` |
+| Import fails with "Cannot create a holding solution for missing base" | An upgrade was attempted where the solution is not installed. The install check should prevent this; check its log line |
 | Prod job never starts | It is waiting for approval. Check the run page |
 
 ## Next steps

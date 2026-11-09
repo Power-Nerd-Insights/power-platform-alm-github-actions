@@ -155,6 +155,8 @@ jobs:
 
       - name: Install Power Platform tools
         uses: microsoft/powerplatform-actions/actions-install@v1.9.2
+        with:
+          add-tools-to-path: true # Lets the next script step call pac directly
 
       - name: Confirm connection to test
         uses: microsoft/powerplatform-actions/who-am-i@v1.9.2
@@ -163,6 +165,32 @@ jobs:
           app-id: ${{ vars.PP_APP_ID }}
           tenant-id: ${{ vars.PP_TENANT_ID }}
           client-secret: ${{ secrets.PP_CLIENT_SECRET }}
+
+      # Stage-and-upgrade needs an installed version to upgrade from, so it fails on a
+      # first install ("Cannot create a holding solution for missing base"). Check what
+      # is installed and only upgrade when the solution is already there.
+      - name: Check whether the solution is already installed
+        id: installed
+        shell: bash
+        env:
+          PP_CLIENT_SECRET: ${{ secrets.PP_CLIENT_SECRET }}
+        run: |
+          pac auth create \
+            --applicationId "${{ vars.PP_APP_ID }}" \
+            --clientSecret "$PP_CLIENT_SECRET" \
+            --tenant "${{ vars.PP_TENANT_ID }}" \
+            --environment "${{ vars.ENVIRONMENT_URL }}" > /dev/null
+          solutions=$(pac solution list)
+          pac auth clear > /dev/null
+
+          # The first column of pac solution list is the unique name.
+          if awk -v name="$SOLUTION_NAME" '$1 == name { found = 1 } END { exit !found }' <<< "$solutions"; then
+            echo "$SOLUTION_NAME is installed. Importing as an upgrade."
+            echo "upgrade=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "$SOLUTION_NAME is not installed. Importing as a first install."
+            echo "upgrade=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Import managed solution
         uses: microsoft/powerplatform-actions/import-solution@v1.9.2
@@ -174,7 +202,7 @@ jobs:
           solution-file: ${{ env.OUTPUT_FOLDER }}/${{ env.SOLUTION_NAME }}_managed.zip
           use-deployment-settings-file: true
           deployment-settings-file: ${{ env.OUTPUT_FOLDER }}/deployment-settings.json
-          stage-and-upgrade: true
+          stage-and-upgrade: ${{ steps.installed.outputs.upgrade }}
           run-asynchronously: true
           max-async-wait-time: 60
 
@@ -214,6 +242,8 @@ jobs:
 
       - name: Install Power Platform tools
         uses: microsoft/powerplatform-actions/actions-install@v1.9.2
+        with:
+          add-tools-to-path: true # Lets the next script step call pac directly
 
       - name: Confirm connection to prod
         uses: microsoft/powerplatform-actions/who-am-i@v1.9.2
@@ -222,6 +252,32 @@ jobs:
           app-id: ${{ vars.PP_APP_ID }}
           tenant-id: ${{ vars.PP_TENANT_ID }}
           client-secret: ${{ secrets.PP_CLIENT_SECRET }}
+
+      # Stage-and-upgrade needs an installed version to upgrade from, so it fails on a
+      # first install ("Cannot create a holding solution for missing base"). Check what
+      # is installed and only upgrade when the solution is already there.
+      - name: Check whether the solution is already installed
+        id: installed
+        shell: bash
+        env:
+          PP_CLIENT_SECRET: ${{ secrets.PP_CLIENT_SECRET }}
+        run: |
+          pac auth create \
+            --applicationId "${{ vars.PP_APP_ID }}" \
+            --clientSecret "$PP_CLIENT_SECRET" \
+            --tenant "${{ vars.PP_TENANT_ID }}" \
+            --environment "${{ vars.ENVIRONMENT_URL }}" > /dev/null
+          solutions=$(pac solution list)
+          pac auth clear > /dev/null
+
+          # The first column of pac solution list is the unique name.
+          if awk -v name="$SOLUTION_NAME" '$1 == name { found = 1 } END { exit !found }' <<< "$solutions"; then
+            echo "$SOLUTION_NAME is installed. Importing as an upgrade."
+            echo "upgrade=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "$SOLUTION_NAME is not installed. Importing as a first install."
+            echo "upgrade=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Import managed solution
         uses: microsoft/powerplatform-actions/import-solution@v1.9.2
@@ -233,6 +289,6 @@ jobs:
           solution-file: ${{ env.OUTPUT_FOLDER }}/${{ env.SOLUTION_NAME }}_managed.zip
           use-deployment-settings-file: true
           deployment-settings-file: ${{ env.OUTPUT_FOLDER }}/deployment-settings.json
-          stage-and-upgrade: true
+          stage-and-upgrade: ${{ steps.installed.outputs.upgrade }}
           run-asynchronously: true
           max-async-wait-time: 60
