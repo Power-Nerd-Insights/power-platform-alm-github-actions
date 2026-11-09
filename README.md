@@ -62,7 +62,7 @@ Follow [SETUP.md](SETUP.md). In outline:
 
 1. Three Dataverse environments and a solution in dev.
 2. An Entra ID app registration with a client secret.
-3. That app added as an application user in each environment.
+3. That app added as an application user in each environment, and the Dataverse connections in test and prod shared with it.
 4. A GitHub repository with `test` and `prod` environments, variables and the `PP_CLIENT_SECRET` secret.
 
 Then run `export-solution`, review and merge the pull request, and approve the prod deployment when it asks.
@@ -100,7 +100,8 @@ Changes that are risky:
 | Symptom | Likely cause |
 |---|---|
 | First Power Platform step fails on authentication | Secret expired or copied wrongly (the Secret ID instead of the Value), or the app user is missing in that environment |
-| Import fails on a connection reference | The connection ID belongs to another environment, or the connection is not owned by or shared with the deploying identity |
+| Import fails with `ConnectionAuthorizationFailed` (403) on a connection | The connection is not shared with the application user. Share it as **Can use** and re-run the failed job. The object ID in the error is the service principal's object ID, not the app ID |
+| Import fails on a connection reference with "not found" | The connection ID belongs to another environment, or was copied without its `shared-…` prefix |
 | Flow imports but stays off | Connection reference not bound. Check the deployment settings for that environment |
 | Import fails on missing dependencies | The solution uses a component that isn't in the target. Add it to the solution or deploy it first |
 | `deploy-test` fails with "variable is not set" | A GitHub environment variable is missing for `test` |
