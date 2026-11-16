@@ -4,7 +4,7 @@ Template GitHub Actions workflows for moving a Power Platform solution from dev 
 
 Built for the Power Nerd session on 13 November 2026. The slide deck is in [`deck/`](deck/).
 
-> **Status:** these workflows are being tested in a demo tenant ahead of the session. This line will be updated once they have run end to end.
+> **Status:** tested end to end in a demo tenant: export to a pull request, build, Solution Checker, and approval-gated deployment to test and prod, both as a first install (9 November 2026) and as an upgrade (live session, 13 November 2026).
 
 ## Why this exists
 
